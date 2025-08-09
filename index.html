@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Log File Plotter</title>
+    <title>GrainBrain Plotter 🧠</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
@@ -11,8 +11,8 @@
         #drop-zone { border: 3px dashed #ccc; border-radius: 20px; width: 90%; max-width: 1000px; padding: 60px; text-align: center; color: #999; margin-bottom: 20px; background-color: #fff; transition: all 0.3s ease; }
         #drop-zone.drag-over { border-color: #007aff; color: #007aff; background-color: #f0f8ff; }
         h1 { color: #333; }
-        .plot-container { width: 95%; max-width: 1200px; }
-        #controls { display: none; margin: 10px 0 20px 0; background-color: #fff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); display: none; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap; }
+        #plot-wrapper { display: none; width: 95%; max-width: 1200px; background-color: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 20px; box-sizing: border-box; }
+        #controls { display: none; margin-bottom: 20px; background-color: #fff; padding: 15px; border-radius: 10px; display: none; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap; }
         #day-selector { font-size: 16px; padding: 5px; border-radius: 5px; border: 1px solid #ccc; }
         .fan-legend { display: flex; align-items: center; font-size: 14px; }
         .fan-legend-box { width: 20px; height: 20px; background-color: rgba(44, 160, 44, 0.2); border: 1px solid rgba(44, 160, 44, 0.4); margin-right: 8px; }
@@ -20,32 +20,34 @@
 </head>
 <body>
 
-    <h1>Device Log Plotter 📊</h1>
+    <h1>GrainBrain Plotter 🧠📈</h1>
 
-    <div id="controls">
+    <div id="drop-zone">Drag & Drop your CSV or TXT Log File Here</div>
+
+        <div id="controls">
         <div>
             <label for="day-selector"><strong>Zoom to Day:</strong></label>
             <select id="day-selector"></select>
         </div>
+    </div>
+    
+    <div id="plot-wrapper">
+        <div id="plot"></div>
+        
         <div class="fan-legend">
             <div class="fan-legend-box"></div>
             <span>Fan ON</span>
         </div>
     </div>
 
-    <div id="drop-zone">Drag & Drop your CSV or TXT Log File Here</div>
-    
-    <div id="plot" class="plot-container"></div>
-
     <script>
         const dropZone = document.getElementById('drop-zone');
         const plotDiv = document.getElementById('plot');
+        const plotWrapper = document.getElementById('plot-wrapper');
         const controlsDiv = document.getElementById('controls');
         const daySelector = document.getElementById('day-selector');
+        let fullTimestamps = [];
 
-        let fullData = {}; 
-
-        // --- Event Listeners ---
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
         dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.classList.remove('drag-over'); });
         dropZone.addEventListener('drop', (e) => {
@@ -62,10 +64,9 @@
         daySelector.addEventListener('change', () => {
             const selectedDay = daySelector.value;
             let startRange, endRange;
-
             if (selectedDay === 'all') {
-                startRange = fullData.timestamps[0];
-                endRange = fullData.timestamps[fullData.timestamps.length - 1];
+                startRange = fullTimestamps[0];
+                endRange = fullTimestamps[fullTimestamps.length - 1];
             } else {
                 startRange = new Date(`${selectedDay}T00:00:00Z`);
                 endRange = new Date(`${selectedDay}T23:59:59.999Z`);
@@ -73,110 +74,100 @@
             Plotly.relayout(plotDiv, { 'xaxis.range': [startRange, endRange] });
         });
 
-        // --- Main Parsing and Plotting Function ---
         function parseAndPlot(file) {
             Papa.parse(file, {
-                header: false,
-                dynamicTyping: true,
-                skipEmptyLines: true,
+                header: false, dynamicTyping: true, skipEmptyLines: true,
                 complete: function(results) {
-                    const data = results.data;
-                    const timestamps = [], inletTemp = [], inletHumidity = [], outletTemp = [], outletHumidity = [], fanStatus = [];
+                    const GAP_DURATION_MS = 3 * 60 * 60 * 1000;
+                    let timestamps = [], inletTemp = [], inletHumidity = [], outletTemp = [], outletHumidity = [], fanStatus = [];
                     const uniqueDays = new Set();
 
-                    for (const row of data) {
-                        if (row.length < 7) continue; // Skip malformed rows
+                    for (const row of results.data) {
+                        if (row.length < 7) continue;
                         const dateParts = String(row[0]).split('.');
-                        const timeStr = String(row[1]);
                         const isoDateStr = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
-                        
                         uniqueDays.add(isoDateStr);
-                        timestamps.push(new Date(`${isoDateStr}T${timeStr}`));
-                        
-                        inletTemp.push(row[2]);
-                        inletHumidity.push(row[3]);
-                        outletTemp.push(row[4]);
-                        outletHumidity.push(row[5]);
-                        fanStatus.push(row[6]);
+                        timestamps.push(new Date(`${isoDateStr}T${String(row[1])}`));
+                        inletTemp.push(row[2]); inletHumidity.push(row[3]); outletTemp.push(row[4]); outletHumidity.push(row[5]); fanStatus.push(row[6]);
                     }
+                    fullTimestamps = timestamps;
                     
-                    fullData = { timestamps, fanStatus };
-                    
-                    // --- Populate Day Selector ---
                     daySelector.innerHTML = '<option value="all">All Days</option>';
-                    const sortedDays = Array.from(uniqueDays).sort();
-                    sortedDays.forEach(day => {
+                    Array.from(uniqueDays).sort().forEach(day => {
                         const option = document.createElement('option');
                         option.value = day;
-                        const displayDate = new Date(`${day}T00:00:00`);
-                        option.textContent = displayDate.toLocaleDateString(undefined, { timeZone:'UTC', month: 'short', day: 'numeric', year: 'numeric' });
+                        option.textContent = new Date(`${day}T00:00:00`).toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
                         daySelector.appendChild(option);
                     });
                     controlsDiv.style.display = 'flex';
+                    plotWrapper.style.display = 'block';
 
-                    // --- Create Shapes for Fan Overlay ---
-                    const fanShapes = [];
+                    // --- Process data for gaps and create annotations ---
+                    let plotTimestamps = [], plotInletTemp = [], plotInletHumidity = [], plotOutletTemp = [], plotOutletHumidity = [];
+                    let layoutShapes = [], layoutAnnotations = [];
+
+                    // Add Fan "ON" shapes, now respecting data gaps
                     let fanOnStart = null;
                     for (let i = 0; i < fanStatus.length; i++) {
-                        if (fanStatus[i] === 1 && fanOnStart === null) fanOnStart = timestamps[i];
-                        else if ((fanStatus[i] === 0 || i === fanStatus.length - 1) && fanOnStart !== null) {
-                            const fanOnEnd = (i === fanStatus.length - 1 && fanStatus[i] === 1) ? timestamps[i] : timestamps[i];
-                            fanShapes.push({
-                                type: 'rect', xref: 'x', yref: 'paper',
-                                x0: fanOnStart, x1: fanOnEnd, y0: 0, y1: 1,
-                                fillcolor: 'rgba(44, 160, 44, 0.2)', layer: 'below', line: { width: 0 }
-                            });
+                        const isLastPoint = i === fanStatus.length - 1;
+                        const gapAfter = !isLastPoint && (timestamps[i+1] - timestamps[i] > GAP_DURATION_MS);
+
+                        if (fanStatus[i] === 1 && fanOnStart === null) {
+                            fanOnStart = timestamps[i];
+                        }
+                        
+                        if (fanOnStart !== null && (fanStatus[i] === 0 || isLastPoint || gapAfter)) {
+                            layoutShapes.push({ type: 'rect', xref: 'x', yref: 'paper', x0: fanOnStart, x1: timestamps[i], y0: 0, y1: 1, fillcolor: 'rgba(44, 160, 44, 0.2)', layer: 'below', line: { width: 0 } });
                             fanOnStart = null;
                         }
                     }
 
-                    // --- Define Plot Traces ---
+                    // Add "No Data" gaps and labels
+                    for (let i = 0; i < timestamps.length; i++) {
+                        plotTimestamps.push(timestamps[i]);
+                        plotInletTemp.push(inletTemp[i]); plotInletHumidity.push(inletHumidity[i]); plotOutletTemp.push(outletTemp[i]); plotOutletHumidity.push(outletHumidity[i]);
+
+                        if (i < timestamps.length - 1) {
+                            const timeDiff = timestamps[i+1] - timestamps[i];
+                            if (timeDiff > GAP_DURATION_MS) {
+                                plotTimestamps.push(null); // This creates the break in the line
+                                plotInletTemp.push(null); plotInletHumidity.push(null); plotOutletTemp.push(null); plotOutletHumidity.push(null);
+
+                                const midpointTime = new Date(timestamps[i].getTime() + timeDiff / 2);
+                                // Add vertical lines at the start and end of the gap
+                                const lineStyle = { color: 'grey', width: 1, dash: 'dot' };
+                                layoutShapes.push({ type: 'line', xref: 'x', yref: 'paper', x0: timestamps[i], x1: timestamps[i], y0: 0, y1: 1, line: lineStyle });
+                                layoutShapes.push({ type: 'line', xref: 'x', yref: 'paper', x0: timestamps[i+1], x1: timestamps[i+1], y0: 0, y1: 1, line: lineStyle });
+                                layoutAnnotations.push({ x: midpointTime, y: 0.5, yref: 'paper', text: 'No Data', showarrow: false, font: { color: 'grey', size: 10 }, textangle: -90 });
+                            }
+                        }
+                    }
+
+                    // --- Define plot ---
                     const plotTraces = [
-                        { x: timestamps, y: inletTemp, name: 'Inlet Temp', type: 'scatter', mode: 'lines', line: { color: '#ff6347' }, yaxis: 'y1' },
-                        { x: timestamps, y: outletTemp, name: 'Outlet Temp', type: 'scatter', mode: 'lines', line: { color: '#8b0000' }, yaxis: 'y1' },
-                        { x: timestamps, y: inletHumidity, name: 'Inlet Humidity', type: 'scatter', mode: 'lines', line: { color: '#1e90ff' }, yaxis: 'y2' },
-                        { x: timestamps, y: outletHumidity, name: 'Outlet Humidity', type: 'scatter', mode: 'lines', line: { color: '#00008b' }, yaxis: 'y2' }
+                        { x: plotTimestamps, y: plotInletTemp, name: 'Inlet Temp', mode: 'lines', line: { color: '#ff6347' }, yaxis: 'y1' },
+                        { x: plotTimestamps, y: plotOutletTemp, name: 'Outlet Temp', mode: 'lines', line: { color: '#8b0000' }, yaxis: 'y1' },
+                        { x: plotTimestamps, y: plotInletHumidity, name: 'Inlet Humidity', mode: 'lines', line: { color: '#1e90ff' }, yaxis: 'y2' },
+                        { x: plotTimestamps, y: plotOutletHumidity, name: 'Outlet Humidity', mode: 'lines', line: { color: '#00008b' }, yaxis: 'y2' }
                     ];
 
-                    // --- Define Layout ---
                     const layout = {
                         title: `Device Log: ${file.name}`,
-                        xaxis: {
-                            domain: [0, 1],
-                            anchor: 'y2',
-                            title: 'Date / Time',
-                            spikemode: 'across', // Vertical line across subplots
-                            spikesnap: 'cursor',
-                            showspikes: true,
-                            spikethickness: 1,
-                            spikedash: 'dot'
-                        },
-                        yaxis: { // Temperature Axis
-                            domain: [0.55, 1], // Top half of the plot
-                            title: 'Temperature (°C)',
-                            gridcolor: '#e9e9e9'
-                        },
-                        yaxis2: { // Humidity Axis
-                            domain: [0, 0.45], // Bottom half of the plot
-                            title: 'Humidity (%)',
-                            gridcolor: '#e9e9e9'
-                        },
-                        shapes: fanShapes,
-                        hovermode: 'x unified', // Show unified tooltips
+                        xaxis: { domain: [0, 1], anchor: 'y2', title: 'Date / Time', spikemode: 'across', spikesnap: 'cursor', showspikes: true },
+                        yaxis: { domain: [0.55, 1], title: 'Temperature (°C)', gridcolor: '#e9e9e9' },
+                        yaxis2: { domain: [0, 0.45], title: 'Humidity (%)', gridcolor: '#e9e9e9' },
+                        shapes: layoutShapes,
+                        annotations: layoutAnnotations,
+                        hovermode: 'x unified',
                         legend: { x: 0.5, y: 1.15, xanchor: 'center', orientation: 'h' },
                         margin: { l: 60, r: 40, t: 80, b: 60 }
                     };
 
                     Plotly.newPlot(plotDiv, plotTraces, layout, {responsive: true});
                     dropZone.innerHTML = `✅ Successfully plotted <strong>${file.name}</strong>. Drop another file to replace.`;
-                },
-                error: (err) => {
-                    alert("An error occurred while parsing the file. Please ensure it is a valid CSV or TXT file.");
-                    console.error(err);
                 }
             });
         }
     </script>
-
 </body>
 </html>
